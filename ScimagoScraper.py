@@ -4,6 +4,7 @@ from docx import Document
 import requests
 from bs4 import BeautifulSoup
 
+
 # Função para extrair nomes das revistas de referências no Word
 def extract_journals_from_docx(file_path):
     document = Document(file_path)
