@@ -3,6 +3,7 @@ import pandas as pd
 from docx import Document
 import requests
 from bs4 import BeautifulSoup
+import time
 
 
 # Função para extrair nomes das revistas de referências no Word
@@ -12,39 +13,65 @@ def extract_journals_from_docx(file_path):
 
     for paragraph in document.paragraphs:
         text = paragraph.text
-        match = re.search(r"([A-Za-z&., ]+?), v\.", text)  # Padrão para nomes de revistas
+        # Regex para capturar o nome da revista dentro da referência
+        match = re.search(r"(?:\.\s)?([A-Za-z&.,\s]+)(?:, v\.|$)", text)  # Ajustado para capturar nomes de revistas
         if match:
             journals.append(match.group(1).strip())
 
     return list(set(journals))  # Remove duplicados
 
-# Função para buscar o ranking no SCImago
+
 def get_scimago_ranking(journal_name):
-    base_url = "https://www.scimagojr.com/journalsearch.php?q="
+    base_url = "https://www.scimagojr.com/journalrank.php"
     query = '+'.join(journal_name.split())
     url = base_url + query
 
+    print(f"Pesquisando por: {journal_name}")
+    print(f"URL: {url}")
+    
     response = requests.get(url)
+    if response.status_code != 200:
+        print(f"Erro ao acessar SCImago para: {journal_name}")
+        return None, None
+
     soup = BeautifulSoup(response.text, "html.parser")
-    results = soup.find("div", {"class": "search_results"})
+    
+    # Verificar se há resultados de busca
+    results = soup.find_all("div", class_="search_results")  # Procurar resultados
+    if not results:
+        print(f"Nenhum resultado encontrado para: {journal_name}")
+        return None, None
 
-    if results:
-        journal_info = results.find("a")  # Primeira entrada da pesquisa
-        if journal_info:
-            details_url = "https://www.scimagojr.com/" + journal_info['href']
-            details_response = requests.get(details_url)
-            details_soup = BeautifulSoup(details_response.text, "html.parser")
+    # Obter o primeiro link de revista
+    first_result = results[0].find("a")
+    if not first_result:
+        print(f"Nenhum detalhe encontrado para: {journal_name}")
+        return None, None
 
-            # Buscar o SJR Indicator e o Quartil
-            sjr_value = details_soup.find("div", text="SJR indicator").find_next_sibling("div").text
-            quartile = details_soup.find("div", text="Quartile").find_next_sibling("div").text
-            return sjr_value, quartile
+    # Acessar página de detalhes da revista
+    details_url = "https://www.scimagojr.com/" + first_result['href']
+    print(f"URL de detalhes: {details_url}")
 
-    return None, None  # Caso não encontre a revista
+    details_response = requests.get(details_url)
+    if details_response.status_code != 200:
+        print(f"Erro ao acessar detalhes para: {journal_name}")
+        return None, None
+
+    details_soup = BeautifulSoup(details_response.text, "html.parser")
+
+    try:
+        # Buscar SJR Indicator e Quartile
+        sjr_value = details_soup.find("div", class_="cell", text="SJR indicator").find_next_sibling("div").text.strip()
+        quartile = details_soup.find("div", class_="cell", text="Quartile").find_next_sibling("div").text.strip()
+        return sjr_value, quartile
+    except AttributeError:
+        print(f"Erro ao extrair informações para: {journal_name}")
+        return None, None
+
 
 # Função principal
 def main(docx_file):
-    # Extrair nomes das revistas
+    # Extrair nomes das revistas do arquivo .docx
     journals = extract_journals_from_docx(docx_file)
     data = []
 
@@ -56,12 +83,17 @@ def main(docx_file):
             "SJR Indicator": sjr,
             "Quartile": quartile
         })
+        time.sleep(2)  # Aguarde 2 segundos entre as requisições para evitar bloqueios
 
-    # Salvar em um arquivo CSV
+    # Salvar os resultados em um arquivo CSV
     df = pd.DataFrame(data)
     df.to_csv("journal_rankings.csv", index=False)
     print("Resultados salvos em 'journal_rankings.csv'.")
 
+
 # Executar o script
-if __name__ == "__main__":
-    main("referencias.docx")  # Substitua pelo nome do seu arquivo Word
+#if __name__ == "__main__":
+#    main("referencias.docx")  # Substitua pelo nome do seu arquivo Word
+
+
+get_scimago_ranking("Quarterly Journal of Economics")
